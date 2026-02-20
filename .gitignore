@@ -1,0 +1,18 @@
+# hide API keys
+.env
+
+# Python virtual environments
+venv/
+.venv/
+
+# cache files
+__pycache__/
+*.pyc
+
+# VS Code & IDE
+.vscode/
+.idea/
+
+# system files
+.DS_Store
+Thumbs.db
