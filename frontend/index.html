@@ -1007,6 +1007,78 @@
   .panel.show{ transform: none !important; }
   .hidden{ display:none !important; }
 }
+    /* =========================
+   FOOTER (CREATIVE)
+   ========================= */
+.row-footer{
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 9000;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--accent),0.20);
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+  overflow: hidden;
+  pointer-events: none; /* won't disturb UI clicks */
+}
+
+.row-footer__glow{
+  position: absolute;
+  inset: -60px;
+  background:
+    radial-gradient(circle at 30% 40%, rgba(var(--accent),0.18), transparent 55%),
+    radial-gradient(circle at 70% 60%, rgba(var(--accent2),0.14), transparent 55%);
+  filter: blur(18px);
+  animation: footerGlow 4.8s ease-in-out infinite alternate;
+  opacity: 0.9;
+}
+
+.row-footer__text{
+  position: relative;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  opacity: 0.92;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.row-footer__name{
+  font-weight: 900;
+  color: rgba(var(--accent),1);
+  text-shadow: 0 0 14px rgba(var(--accent),0.25);
+}
+
+.row-footer__dot{
+  opacity: 0.65;
+}
+
+.row-footer__tag{
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--accent),0.22);
+  background: rgba(var(--accent),0.10);
+  box-shadow: 0 0 16px rgba(var(--accent),0.10);
+  font-weight: 700;
+}
+
+@keyframes footerGlow{
+  0% { transform: translate3d(0,0,0) scale(1); }
+  100% { transform: translate3d(14px,-10px,0) scale(1.04); }
+}
+
+/* Mobile: keep footer visible but avoid overlapping the input bar */
+@media (max-width: 640px){
+  .row-footer{
+    left: 10px;
+    bottom: 74px; /* stays above fixed input bar */
+    transform: scale(0.98);
+  }
+}
   </style>
 </head>
 
@@ -1194,7 +1266,14 @@
     </ul>
   </div>
 </div>
-
+<footer class="row-footer">
+  <div class="row-footer__glow"></div>
+  <div class="row-footer__text">
+    Crafted by <span class="row-footer__name">Ikshit Diwakar</span>
+    <span class="row-footer__dot">•</span>
+    <span class="row-footer__tag">RowAI</span>
+  </div>
+</footer>
   <script>
 /* =========================
    ROW UI CORE SCRIPT (COMPILED + SAFE)
