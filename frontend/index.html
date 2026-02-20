@@ -908,10 +908,134 @@
 /* About text */
 .about p, .about li{ font-size:13px; opacity:.95; }
 
-/* Mobile: keep UI clean */
-@media (max-width: 640px){
-  .membox, .panel{ display:none !important; }
+/* =========================
+   MOBILE LAYOUT FIX
+   ========================= */
+@media (max-width: 640px) {
+
+  /* hide desktop-only panels */
+  .sidehud { display: none !important; }
+  .hud-lines { opacity: 0.25; }
+
+  /* make container fit */
+  .container {
+    width: 94vw !important;
+    margin: 90px auto 16px auto !important;
+    padding: 10px !important;
+  }
+
+  /* chat area visible and taller */
+  .chat-area {
+    height: 52vh !important;
+    max-height: 52vh !important;
+    overflow-y: auto !important;
+  }
+
+  /* input bar stays usable */
+  .input-bar {
+    position: sticky !important;
+    bottom: 10px !important;
+    gap: 8px !important;
+  }
+
+  #userInput {
+    font-size: 16px !important; /* prevents iOS zoom */
+  }
+
+  /* modes wrap nicely */
+  .modes {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    justify-content: center !important;
+  }
+
+  .mode {
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+  }
+
+  /* move memory/about box to top-right */
+  .membox {
+    position: fixed !important;
+    right: 12px !important;
+    top: 90px !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  /* make panels full-screen on mobile */
+  .panel {
+    position: fixed !important;
+    inset: 12px !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    z-index: 10000 !important;
+    overflow: auto !important;
+    border-radius: 18px !important;
+  }
 }
+    /* =========================
+   MOBILE FIXES (RowAI)
+   ========================= */
+@media (max-width: 640px){
+
+  /* Hide desktop-only HUD */
+  .sidehud { display: none !important; }
+
+  /* Keep UI centered and readable */
+  .container{
+    width: 94vw !important;
+    margin: 90px auto 14px auto !important;
+    padding: 10px !important;
+  }
+
+  /* Make chat visible and taller */
+  .chat-area{
+    height: 55vh !important;
+    max-height: 55vh !important;
+    overflow-y: auto !important;
+  }
+
+  /* Prevent iOS zoom on input */
+  #userInput{ font-size: 16px !important; }
+
+  /* Modes wrap */
+  .modes{
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    justify-content: center !important;
+  }
+
+  /* Memory/About box stays reachable */
+  .membox{
+    position: fixed !important;
+    right: 12px !important;
+    top: 92px !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  /* Panels become full-screen overlays on mobile */
+  .panel{
+    position: fixed !important;
+    left: 10px !important;
+    right: 10px !important;
+    top: 10px !important;
+    bottom: 10px !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: auto !important;
+    z-index: 10000 !important;
+    border-radius: 18px !important;
+  }
+}
+    .hidden { display: none !important; }
   </style>
 </head>
 
@@ -1843,6 +1967,61 @@ tabs.forEach(t=>{
     document.getElementById("tab-"+name)?.classList.add("show");
   });
 });
+    /* =========================
+   MEMORY HUB + ABOUT (UI WIRING)
+   ========================= */
+function openPanel(panel){
+  if (!panel) return;
+  panel.classList.remove("hidden");
+  panel.classList.add("show"); // optional, if you use .show in CSS
+}
+
+function closePanel(panel){
+  if (!panel) return;
+  panel.classList.add("hidden");
+  panel.classList.remove("show");
+}
+
+if (memHubBtn) memHubBtn.addEventListener("click", () => openPanel(memHub));
+if (memAboutBtn) memAboutBtn.addEventListener("click", () => openPanel(memAbout));
+
+if (memClose) memClose.addEventListener("click", () => closePanel(memHub));
+if (aboutClose) aboutClose.addEventListener("click", () => closePanel(memAbout));
+
+// close when clicking outside panel content (optional)
+document.addEventListener("click", (e) => {
+  const isOpenHub = memHub && !memHub.classList.contains("hidden");
+  const isOpenAbout = memAbout && !memAbout.classList.contains("hidden");
+
+  if (isOpenHub && e.target === memHub) closePanel(memHub);
+  if (isOpenAbout && e.target === memAbout) closePanel(memAbout);
+});
+
+/* =========================
+   MEMORY HUB TABS (Add/PDF/View/Export)
+   ========================= */
+const tabButtons = document.querySelectorAll("#memHub .tab");
+const tabPages = {
+  add: document.getElementById("tab-add"),
+  pdf: document.getElementById("tab-pdf"),
+  view: document.getElementById("tab-view"),
+  export: document.getElementById("tab-export"),
+};
+
+function showTab(name){
+  Object.values(tabPages).forEach(p => p && p.classList.remove("show"));
+  if (tabPages[name]) tabPages[name].classList.add("show");
+
+  tabButtons.forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+}
+
+tabButtons.forEach(btn=>{
+  btn.addEventListener("click", ()=> showTab(btn.dataset.tab));
+});
+
+// default tab
+showTab("add");
+
 </script>
 </body>
 </html>
