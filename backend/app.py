@@ -13,7 +13,7 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
+rag_init()
 # ----------------------------
 # PATHS
 # ----------------------------
@@ -561,14 +561,11 @@ def chat():
 # RUN SERVER
 # ----------------------------
 if __name__ == "__main__":
-    rag_init()
     print("✅ Row Backend Starting (Groq + Memory + RAG + Auto-Mode)...")
     print("📌 Frontend Path:", INDEX_PATH)
     print("📌 Frontend Found:", os.path.exists(INDEX_PATH))
     print("📌 Groq Models:", GROQ_MODELS)
     print("📌 RAG DB:", RAG_DB_PATH)
 
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
