@@ -1,19 +1,18 @@
+# backend/app.py
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
-import os
-import requests
-import traceback
-import re
-import sqlite3
+import os, requests, traceback, re, sqlite3, io
 from datetime import datetime
-from flask import Response
 
 load_dotenv()
 
+# ----------------------------
+# APP
+# ----------------------------
 app = Flask(__name__)
 CORS(app)
-rag_init()
+
 # ----------------------------
 # PATHS
 # ----------------------------
@@ -25,7 +24,6 @@ INDEX_PATH = os.path.join(BASE_DIR, "frontend", "index.html")
 # ----------------------------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-
 GROQ_MODELS = [
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
@@ -69,7 +67,7 @@ SPECIAL OUTPUT RULES (IMPORTANT):
 
 DEFAULT RULE:
 - Keep answers compact but powerful.
-"""
+""".strip()
 
 # ----------------------------
 # MEMORY (IN-RAM CHAT HISTORY)
@@ -78,7 +76,7 @@ MEMORY = {}
 MAX_MEMORY_MESSAGES = 20  # last 20 messages total (user+assistant)
 
 # ----------------------------
-# RAG (SQLite FTS5) - Lightweight Retrieval
+# RAG (SQLite FTS5)
 # ----------------------------
 RAG_DB_PATH = os.path.join(os.path.dirname(__file__), "rag.db")
 
@@ -92,12 +90,11 @@ def rag_init():
     con.commit()
     con.close()
 
-def rag_add_doc(title: str, content: str, source: str = "manual"):
+def rag_add_doc(title: str, content: str, source: str = "manual") -> bool:
     title = (title or "").strip()[:200]
     content = (content or "").strip()
     if not content:
         return False
-
     con = sqlite3.connect(RAG_DB_PATH)
     cur = con.cursor()
     cur.execute(
@@ -112,7 +109,6 @@ def rag_search(query: str, k: int = 5):
     query = (query or "").strip()
     if not query:
         return []
-
     con = sqlite3.connect(RAG_DB_PATH)
     cur = con.cursor()
     cur.execute("""
@@ -121,25 +117,19 @@ def rag_search(query: str, k: int = 5):
         WHERE rag_docs MATCH ?
         LIMIT ?;
     """, (query, int(k)))
-
     rows = cur.fetchall()
     con.close()
-
     return [{"title": t, "source": s, "snippet": sn} for (t, s, sn) in rows]
 
 def wants_rag(user_message: str) -> bool:
     t = (user_message or "").lower()
-    return (
-        "search my docs" in t or
-        "search my notes" in t or
-        "from my docs" in t or
-        "in my notes" in t or
-        "use my docs" in t
-    )
+    return any(x in t for x in (
+        "search my docs", "search my notes", "from my docs", "in my notes", "use my docs"
+    ))
+
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     try:
         from pypdf import PdfReader
-        import io
         reader = PdfReader(io.BytesIO(file_bytes))
         parts = []
         for p in reader.pages:
@@ -147,11 +137,14 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
             if txt.strip():
                 parts.append(txt)
         return "\n\n".join(parts).strip()
-    except Exception as e:
+    except Exception:
         return ""
 
+# ✅ IMPORTANT: init RAG at import time so it works with gunicorn too
+rag_init()
+
 # ----------------------------
-# IMAGE REQUEST HANDLING (polite refusal + prompt)
+# IMAGE REQUEST HANDLING
 # ----------------------------
 IMAGE_KEYWORDS = [
     "generate an image", "create an image", "make an image", "draw",
@@ -205,15 +198,11 @@ blurry, low-resolution, distortion, watermark, text artifacts, ugly, noisy backg
 # ----------------------------
 def infer_mode(user_message: str) -> str:
     t = (user_message or "").lower()
-
-    # explicit mode commands
     if re.search(r"\b(code mode|switch to code|mode to code|change mode to code)\b", t): return "Code"
     if re.search(r"\b(search mode|switch to search|mode to search|change mode to search)\b", t): return "Search"
     if re.search(r"\b(plan mode|switch to plan|mode to plan|change mode to plan)\b", t): return "Plan"
     if re.search(r"\b(create mode|switch to create|mode to create|change mode to create)\b", t): return "Create"
     if re.search(r"\b(chat mode|switch to chat|mode to chat|change mode to chat)\b", t): return "Chat"
-
-    # heuristic
     if re.search(r"\b(plan|roadmap|steps|timeline|strategy)\b", t): return "Plan"
     if re.search(r"\b(write code|python|c\+\+|java|javascript|flask|bug|error|traceback|fix|exception)\b", t): return "Code"
     if re.search(r"\b(search|latest|facts|compare|pros and cons|list)\b", t): return "Search"
@@ -224,46 +213,30 @@ def infer_mode(user_message: str) -> str:
 # HELPERS
 # ----------------------------
 def clean_output(text: str) -> str:
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return re.sub(r"\n{3,}", "\n\n", (text or "")).strip()
 
 def trim_memory(history):
-    if len(history) > MAX_MEMORY_MESSAGES:
-        return history[-MAX_MEMORY_MESSAGES:]
-    return history
+    return history[-MAX_MEMORY_MESSAGES:] if len(history) > MAX_MEMORY_MESSAGES else history
 
 def memory_count_for(session_id: str) -> int:
-    h = MEMORY.get(session_id, [])
-    return len(h) // 2
+    return len(MEMORY.get(session_id, [])) // 2
 
 def groq_chat(messages):
     if not GROQ_API_KEY:
-        raise Exception("❌ GROQ_API_KEY missing. Add it in backend/.env file")
+        raise Exception("❌ GROQ_API_KEY missing. Add it as an Environment Variable (Replit Secrets).")
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     last_error = None
 
     for model in GROQ_MODELS:
         try:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": 0.6,
-                "max_tokens": 1200
-            }
-
-            response = requests.post(GROQ_URL, headers=headers, json=payload)
-
+            payload = {"model": model, "messages": messages, "temperature": 0.6, "max_tokens": 1200}
+            response = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
             if response.status_code == 200:
                 data = response.json()
-                output = data["choices"][0]["message"]["content"].strip()
-                return output, model
-            else:
-                last_error = f"Groq API Error {response.status_code}: {response.text}"
+                out = data["choices"][0]["message"]["content"].strip()
+                return out, model
+            last_error = f"Groq API Error {response.status_code}: {response.text}"
         except Exception as e:
             last_error = str(e)
 
@@ -272,50 +245,29 @@ def groq_chat(messages):
 def generate_response(session_id, user_message, mode):
     if session_id not in MEMORY:
         MEMORY[session_id] = []
-
     history = MEMORY[session_id]
 
     mode_prompt = f"""
 Current Mode: {mode}
 
 STRICT MODE BEHAVIOR:
-
-Chat:
-- normal response
-- professional
-- concise
-
-Search:
-- bullet points
-- factual summary
-- practical suggestions
-- no hallucination
-
-Create:
-- creative output
-
-Code:
-- clean correct code
-- minimal explanation unless asked
-
-Plan:
-- structured plan
-- timeline if needed
+Chat: normal response, professional, concise
+Search: bullet points only, factual summary, practical suggestions, no hallucination
+Create: creative output
+Code: clean correct code, minimal explanation unless asked
+Plan: structured plan, timeline if needed
 
 IMPORTANT:
 Follow the user's formatting instructions strictly.
 Use the conversation history as context.
-"""
+""".strip()
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "system", "content": mode_prompt},
+        *history
     ]
 
-    # History
-    messages.extend(history)
-
-    # Tool: RAG injection (only when user asks)
     if wants_rag(user_message):
         hits = rag_search(user_message, k=5)
         if hits:
@@ -324,13 +276,11 @@ Use the conversation history as context.
                 ctx += f"{i}) {h['title']} [{h['source']}]\n{h['snippet']}\n\n"
             messages.append({"role": "system", "content": ctx})
 
-    # New user message
     messages.append({"role": "user", "content": user_message})
 
     reply, used_model = groq_chat(messages)
     reply = clean_output(reply)
 
-    # Save memory
     history.append({"role": "user", "content": user_message})
     history.append({"role": "assistant", "content": reply})
     MEMORY[session_id] = trim_memory(history)
@@ -344,7 +294,7 @@ Use the conversation history as context.
 def serve_frontend():
     if os.path.exists(INDEX_PATH):
         return send_file(INDEX_PATH)
-    return "❌ index.html not found. Put it in RowAI/frontend/index.html", 404
+    return "❌ index.html not found. Put it in frontend/index.html", 404
 
 @app.route("/api/health", methods=["GET"])
 def health():
@@ -356,7 +306,7 @@ def health():
 
 @app.route("/api/reset", methods=["POST"])
 def reset():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     session_id = data.get("session_id", "default")
     MEMORY[session_id] = []
     return jsonify({"status": "Memory reset successful", "session_id": session_id})
@@ -364,11 +314,12 @@ def reset():
 @app.route("/api/rag/add", methods=["POST"])
 def rag_add():
     try:
-        data = request.get_json() or {}
-        title = data.get("title", "Row Doc")
-        content = data.get("content", "")
-        source = data.get("source", "manual")
-        ok = rag_add_doc(title, content, source)
+        data = request.get_json(silent=True) or {}
+        ok = rag_add_doc(
+            title=data.get("title", "Row Doc"),
+            content=data.get("content", ""),
+            source=data.get("source", "manual"),
+        )
         return jsonify({"ok": ok})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -376,19 +327,17 @@ def rag_add():
 @app.route("/api/rag/search", methods=["POST"])
 def rag_search_api():
     try:
-        data = request.get_json() or {}
-        query = data.get("query", "")
-        k = int(data.get("k", 5))
-        results = rag_search(query, k)
+        data = request.get_json(silent=True) or {}
+        results = rag_search(data.get("query", ""), int(data.get("k", 5)))
         return jsonify({"results": results})
     except Exception as e:
         return jsonify({"results": [], "error": str(e)}), 500
+
 @app.route("/api/rag/list", methods=["GET"])
 def rag_list():
     try:
-        q = request.args.get("q", "").strip()
+        q = (request.args.get("q", "") or "").strip()
         limit = int(request.args.get("limit", "50"))
-
         con = sqlite3.connect(RAG_DB_PATH)
         cur = con.cursor()
 
@@ -410,37 +359,28 @@ def rag_list():
         rows = cur.fetchall()
         con.close()
 
-        items = []
-        for rowid, title, source, created_at, snippet in rows:
-            items.append({
-                "id": rowid,
-                "title": title,
-                "source": source,
-                "created_at": created_at,
-                "snippet": snippet
-            })
+        items = [{
+            "id": rowid, "title": title, "source": source,
+            "created_at": created_at, "snippet": snippet
+        } for (rowid, title, source, created_at, snippet) in rows]
 
         return jsonify({"items": items})
     except Exception as e:
         return jsonify({"items": [], "error": str(e)}), 500
 
-
 @app.route("/api/rag/delete", methods=["POST"])
 def rag_delete():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         doc_id = int(data.get("id"))
-
         con = sqlite3.connect(RAG_DB_PATH)
         cur = con.cursor()
         cur.execute("DELETE FROM rag_docs WHERE rowid = ?;", (doc_id,))
         con.commit()
         con.close()
-
         return jsonify({"ok": True, "deleted": doc_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
 
 @app.route("/api/rag/clear", methods=["POST"])
 def rag_clear():
@@ -453,7 +393,6 @@ def rag_clear():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
 
 @app.route("/api/rag/export", methods=["GET"])
 def rag_export():
@@ -468,20 +407,14 @@ def rag_export():
         rows = cur.fetchall()
         con.close()
 
-        payload = []
-        for rowid, title, content, source, created_at in rows:
-            payload.append({
-                "id": rowid,
-                "title": title,
-                "content": content,
-                "source": source,
-                "created_at": created_at
-            })
+        payload = [{
+            "id": rowid, "title": title, "content": content,
+            "source": source, "created_at": created_at
+        } for (rowid, title, content, source, created_at) in rows]
 
         return jsonify({"exported_at": datetime.utcnow().isoformat(), "docs": payload})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/rag/upload", methods=["POST"])
 def rag_upload():
@@ -493,9 +426,7 @@ def rag_upload():
         filename = (f.filename or "document").strip()
         raw = f.read()
 
-        # PDF only in this version
         text = extract_text_from_pdf(raw)
-
         if not text:
             return jsonify({"ok": False, "error": "Could not read PDF text. (Try a text-based PDF)"}), 400
 
@@ -503,35 +434,32 @@ def rag_upload():
         return jsonify({"ok": ok, "title": filename, "chars": len(text)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
-        data = request.get_json() or {}
-        user_message = data.get("message", "").strip()
-        mode = data.get("mode", "Chat").strip()
+        data = request.get_json(silent=True) or {}
+        user_message = (data.get("message", "") or "").strip()
+        mode = (data.get("mode", "Chat") or "Chat").strip()
         session_id = data.get("session_id", "default")
 
         if not user_message:
             return jsonify({"reply": "⚠️ Please type something."})
 
-        # Auto mode
         if mode.lower() == "auto":
             mode = infer_mode(user_message)
 
-        # Image requests: polite refusal + prompt (no model call)
         if is_image_request(user_message):
             reply = (
                 "⚠️ I can’t generate images directly inside Row yet.\n\n"
                 "But I *can* help you generate it on ChatGPT / Gemini / other image tools.\n\n"
                 + build_image_prompt(user_message)
             )
-
-            if session_id not in MEMORY:
-                MEMORY[session_id] = []
-            MEMORY[session_id].append({"role": "user", "content": user_message})
-            MEMORY[session_id].append({"role": "assistant", "content": reply})
+            MEMORY.setdefault(session_id, []).extend([
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": reply},
+            ])
             MEMORY[session_id] = trim_memory(MEMORY[session_id])
-
             return jsonify({
                 "reply": reply,
                 "mode": mode,
@@ -541,7 +469,6 @@ def chat():
             })
 
         reply, used_model = generate_response(session_id, user_message, mode)
-
         return jsonify({
             "reply": reply,
             "mode": mode,
@@ -558,7 +485,7 @@ def chat():
         }), 500
 
 # ----------------------------
-# RUN SERVER
+# RUN SERVER (local dev)
 # ----------------------------
 if __name__ == "__main__":
     print("✅ Row Backend Starting (Groq + Memory + RAG + Auto-Mode)...")
