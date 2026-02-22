@@ -5,7 +5,7 @@ RowAI is a futuristic AI assistant with a cinematic HUD interface, voice interac
 It delivers fast, context-aware responses while allowing users to store and search their own knowledge.
 
 🔗 Live Demo:
-👉 https://row-ai--ikshitdiwakar89.replit.app
+👉 [https://row-ai--ikshitdiwakar89.replit.app](https://row-ai--ikshitdiwakar89.replit.app)
 
 ✨ Features
 
